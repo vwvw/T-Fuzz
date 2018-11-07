@@ -1,4 +1,6 @@
 from . import cov
+from . import checksum
+from . import detector
 from . import ncc
 from . import r2
 from . import tfuzz_fuzzer
