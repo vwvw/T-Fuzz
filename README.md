@@ -38,7 +38,7 @@ $ ./sys/install.sh
 ```
 $ sudo apt-get install build-essential gcc-multilib libtool automake autoconf bison debootstrap debian-archive-keyring
 $ sudo apt-get build-dep qemu-system
-$ sudo apt-get install libacl1-dev
+$ sudo apt-get install libacl1-dev libtool-bin libc-bin:2.20
 ```
 
 

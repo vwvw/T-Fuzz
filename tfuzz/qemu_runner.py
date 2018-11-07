@@ -184,6 +184,10 @@ class QEMURunner(object):
 
             p = None
             try:
+                temp_environ = None
+                if "QEMU_LD_PREFIX" in os.environ:
+                    temp_environ = os.environ["QEMU_LD_PREFIX"]
+                    os.environ["QEMU_LD_PREFIX"] = ""
                 # we assume qemu with always exit and won't block
                 if type(self.input) == str:
                     l.debug("Tracing as raw input")
@@ -204,6 +208,8 @@ class QEMURunner(object):
                         out_s.send(write)
                         time.sleep(.01)
 
+                if temp_environ is not None:
+                    os.environ["QEMU_LD_PREFIX"] = temp_environ
                 ret = p.wait(timeout=self.trace_timeout)
 
                 # did a crash occur?
