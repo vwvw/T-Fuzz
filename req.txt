@@ -78,7 +78,7 @@ ROPGadget==5.4
 rpyc==3.4.4
 scandir==1.7
 git+https://github.com/vwvw/shellphish-afl.git
-shellphish-qemu==0.9.7
+shellphish-qemu==0.9.9
 simplegeneric==0.8.1
 six==1.11.0
 snowballstemmer==1.2.1
