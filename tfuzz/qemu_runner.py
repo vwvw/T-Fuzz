@@ -150,7 +150,7 @@ class QEMURunner(object):
 
         # import ipdb; ipdb.set_trace()
 
-        logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
+        _, logname = tempfile.mkstemp(dir="/dev/shm/", prefix="tracer-log-")
 
         args = [self._trace_source_path]
         if self._seed is not None:
@@ -164,7 +164,7 @@ class QEMURunner(object):
             args += ["-magicdump", mname]
 
         if self._record_trace:
-            args += ["-d", "exec", "-D", logname]
+            args += ["-seed", "1", "-d", "exec", "-D", logname]
         else:
             args += ["-enable_double_empty_exiting"]
 
@@ -188,6 +188,7 @@ class QEMURunner(object):
                 if "QEMU_LD_PREFIX" in os.environ:
                     temp_environ = os.environ["QEMU_LD_PREFIX"]
                     os.environ["QEMU_LD_PREFIX"] = ""
+                #import ipdb; ipdb.set_trace()
                 # we assume qemu with always exit and won't block
                 if type(self.input) == str:
                     l.debug("Tracing as raw input")
@@ -233,22 +234,34 @@ class QEMURunner(object):
 
         if self._record_trace:
             try:
+                #import ipdb; ipdb.set_trace()
                 trace = open(logname).read()
                 addrs = []
                 self.trace = addrs
-
-                # Find where qemu loaded the binary. Primarily for PIE
-                qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0], 16)
-                self.base_addr = qemu_base_addr
+                self.real_trace = []
 
                 prog = re.compile(r'Trace (.*) \[(?P<addr>.*)\].*')
-                for t in trace.split('\n'):
-                    m = prog.match(t)
-                    if m != None:
-                        addr_str = m.group('addr')
-                        addrs.append(int(addr_str, base=16))
+                inst = re.compile(r'(?P<addr>0x.*):  (?P<inst>.*)')
+                idx = 0
+                splitted = trace.split('\n')
+                while idx < len(splitted):
+                    if splitted[idx].startswith('strat_code'):
+                        # Find where qemu loaded the binary. Primarily for PIE
+                        self.base_addr = int(t[10:],16)
                     else:
-                        continue
+                        m = prog.match(splitted[idx])
+                        if m != None:
+                            addr_str = m.group('addr')
+                            addrs.append(int(addr_str, base=16))
+                            if idx + 1 < len(splitted) and splitted[idx+1] == '----------------':
+                                assert splitted[idx+2].startswith('IN: ')
+                                idx += 3
+                                while splitted[idx].startswith('0x'):
+                                    mm = inst.match(splitted[idx])
+                                    assert mm is not None
+                                    self.real_trace.append((int(mm.group('addr'), 16), mm.group('inst')))
+                                    idx += 1
+                    idx += 1
 
                 # grab the faulting address
                 if self.crash_mode:

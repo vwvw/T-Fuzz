@@ -20,6 +20,7 @@ class Radare2(object):
         if flags != None and isinstance(flags, list):
             self.r2 = r2pipe.open(self.program, flags=flags)
         else:
+            #import ipdb; ipdb.set_trace()
             self.r2 = r2pipe.open(self.program)
         # self.r2.cmd("aa")
 
