@@ -1,4 +1,5 @@
 #include <string.h> 
+#include <signal.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <dlfcn.h>
@@ -36,8 +37,35 @@ typedef struct z_stream_s {
 
 typedef int plugin_func();
 unsigned long __REPLACE__FUNC_NAME__(z_stream* strm, int flush) {
+    //recover program name
+    FILE *fptr;
+    char c;
+    fptr = fopen("/proc/self/cmdline", "r");
+    if (fptr == NULL)
+    {
+        printf("Cannot open file \n");
+        exit(0);
+    }
 
-    char * prog_name = "__REPLACE__BINARY__";
+    // Read contents from file
+    static char original_arguments [10][1280];
+    int args_len [10];
+    int ii = 0;
+    int jj = 0;
+    c = fgetc(fptr);
+    while (c != EOF) {
+        if (c == 0) {
+            args_len[ii] = jj;
+            ii++;
+            jj = 0;
+        } else {
+            original_arguments[ii][jj] = c;
+            jj++;
+        }
+        c = fgetc(fptr);
+    }
+    fclose(fptr);
+    // find at which address binary is loaded.
     char buf[512];
     FILE *file;
     sprintf(buf, "/proc/%d/maps", getpid());
@@ -49,10 +77,7 @@ unsigned long __REPLACE__FUNC_NAME__(z_stream* strm, int flush) {
         char flags[4];
         char prog[500];
        int ret = sscanf(buf, "%lx-%lx %c%c%c%c %x %x:%x %lu %s", &from, &to, &flags[0],&flags[1],&flags[2],&flags[3], &pgoff, &major, &minor,&ino, prog);
-        
-        
-        if (flags[2] == 'x' && strstr(prog, prog_name) != NULL){
-           printf("%p\n", from);
+        if (flags[2] == 'x' && strstr(prog, original_arguments[0]) != NULL){
            if (load_address != 0) {exit(2);}
            load_address = from;
         }
@@ -60,106 +85,77 @@ unsigned long __REPLACE__FUNC_NAME__(z_stream* strm, int flush) {
     fclose(file);
 
     void* return_address = __builtin_return_address(0);
-    //
-    //int return_addresses_size = 100;
-    //void* *return_addresses;
-    //return_addresses = malloc(sizeof(void*) * return_addresses_size);
-    //if(!return_addresses) {
-    //    abort();
-    //}
-    //memset(return_address, NULL, return_addresses_size *sizeof(void*));
-    //int i = 0;
-    //while(__builtin_return_address(i) != 0) {
-    //    return_addresses[i] = __builtin_return_address(i);
-    //    i++;
-    //    if(i == return_addresses_size) {
-    //        return_addresses_size = return_addresses_size + 100;
-    //        void* *extended_return_addresses = realloc(return_addresses, return_addresses_size * size(void*))
-    //        if (extended_return_addresses) {
-    //            memset(extended_return_addresses + return_addresses_size - 100, NULL, return_addresses_size * size(void*));
-    //            return_addresses = extended_return_addresses;
-    //        } else {
-    //            abort();
-    //        }
-    //    }
-    //}
     unsigned long rel_ret_addr = (unsigned long)return_address - (unsigned long)load_address;
     const char *check_addr_str[__REPLACE_NUMBER_CHECK_ADDR__];
     __REPLACE_CHECK_ADDR__
     unsigned long check_addr[__REPLACE_NUMBER_CHECK_ADDR__];
+
     bool in_add = false;
     for(int k = 0; k < __REPLACE_NUMBER_CHECK_ADDR__; k++) {
         in_add = in_add || rel_ret_addr == strtoul(check_addr_str[k], NULL, 16);    
     }
 
-    printf("%p\n", rel_ret_addr);
-    
-    void* handle = dlopen("__REPLACE__ORIGINAL__LIBRARY__", RTLD_LAZY);
-    if (handle == NULL) {
-        fprintf(stderr, "Could not open plugin: %s\n", dlerror());
-        return 1;
-    }
+    int ret = 0;
     if(in_add) {
         // return fuzzing data
-        FILE *fout = fopen("out.txt", "rb");
+        FILE *fout = fopen(original_arguments[__INPUT_ARG_NUMBER__ - 1], "rb");
         int cOut;
 
-        int i = 0;
         int j = 0;
+        int initial_offset = __COMPRESSED_DATA_OFFSET__;
         if (fout == NULL)
         {
             fprintf(stderr, "Error opening file!\n");
             exit(EXIT_FAILURE);
         }
+
+        // push iterator to the point where we have data not yet sent
         cOut = fgetc(fout);
-        while(cOut != EOF && j < strm->total_in) {
+        while(cOut != EOF && j < strm->total_out + initial_offset) {
             j++;
             cOut = fgetc(fout);
         }
+        int i = 0;
         while(cOut != EOF && i < strm->avail_out)
         {
-            Bytef *m = NULL;
-            strm->next_out[i++] = cOut;  //iterate buffer byte by byte
+            strm->next_out[i] = cOut;  //iterate buffer byte by byte
+            i++;
             cOut = fgetc(fout);
         }
-        if(cOut != EOF && strm->avail_in > i) {
-            // the ouput buffer is full but we still have data
+        if(cOut != EOF ) {
+            strm->total_in += 1;
             strm->total_out += strm->avail_out;
-            printf("full in %ld\n", strm->avail_in);
-            printf("out %ld\n", strm->avail_out);
-            strm->total_in += i;
             strm->avail_out = 0;
-            strm->avail_in -= i;
-            printf("out %ld\n", strm->total_out);
-            printf("in %ld\n", strm->total_in);
-            fclose(fout);
-            return 0;
+            strm->avail_in -= 1;
+            strm->next_in += 1;
         } else {
-            strm->total_out += strm->avail_out;
-            printf("in %ld\n", strm->avail_in);
-            printf("out %ld\n", strm->avail_out);
+            strm->total_out += i;
             strm->total_in += strm->avail_in;
-            strm->next_in[0] = '\0';
-            strm->avail_out = 0;
+            strm->avail_out -= i;
+            strm->next_in += strm->avail_in;
             strm->avail_in = 0;
-            printf("out %ld\n", strm->total_out);
-            printf("in %ld\n", strm->total_in);
-            fclose(fout);
+            ret = 1;
+        }
+        fclose(fout);
+    } else {
+        fprintf(stdout, "current check call: %p", (void*)rel_ret_addr);
+        void* handle = dlopen("__REPLACE__ORIGINAL__LIBRARY__", RTLD_LAZY);
+        if (handle == NULL) {
+            fprintf(stderr, "Could not open plugin: %s\n", dlerror());
             return 1;
         }
-    } else {
-        printf("else case %ld\n", strm->total_in);
 
         plugin_func* f = dlsym(handle, "__REPLACE__FUNC_NAME__");
         if (f == NULL) {
             fprintf(stderr, "Could not find plugin_func: %s\n", dlerror());
             return 1;
         }
-        int ret = f(strm, flush);
+        ret = f(strm, flush);
         if (dlclose(handle) != 0) {
             fprintf(stderr, "Could not close plugin: %s\n", dlerror());
             return 1;
         }
-        return ret;
     }
+
+    return ret;
 }
